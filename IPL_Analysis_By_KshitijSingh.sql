@@ -1,0 +1,259 @@
+-- Databricks notebook source
+-- DBTITLE 1,Uploading Datasets in Databricks
+-- MAGIC %python
+-- MAGIC ipl_match = spark.read.format("csv").load("dbfs:/FileStore/shared_uploads/kshitijsinghh99@gmail.com/ipl_matches-2.csv",header="true")
+-- MAGIC ipl_venues = spark.read.format("csv").load("dbfs:/FileStore/shared_uploads/kshitijsinghh99@gmail.com/ipl_venue-3.csv",header="true")
+-- MAGIC ipl_balls = spark.read.format("csv").load("dbfs:/FileStore/shared_uploads/kshitijsinghh99@gmail.com/ipl_ball_by_ball.csv",header="true")
+-- MAGIC 
+-- MAGIC ipl_match.createOrReplaceTempView("ipl_matches")
+-- MAGIC ipl_venues.createOrReplaceTempView("ipl_venue")
+-- MAGIC ipl_balls.createOrReplaceTempView("ipl_ball")
+
+-- COMMAND ----------
+
+-- DBTITLE 1,Q2.1-Find the top 3 venues which hosted the most number of eliminator matches? 
+-- MAGIC %sql
+-- MAGIC with cte as(
+-- MAGIC select count(ipl_matches.match_id) as number_of_matches , ipl_venue.venue from ipl_matches inner join ipl_venue on ipl_matches.venue_id= ipl_venue.venue_id where ipl_matches.eliminator= 'Y' group by ipl_venue.venue 
+-- MAGIC )
+-- MAGIC ,cts as(
+-- MAGIC select * , rank() over (order by number_of_matches desc) as rank from cte 
+-- MAGIC )
+-- MAGIC select cts.number_of_matches, cts.venue from cts where rank<4
+
+-- COMMAND ----------
+
+-- DBTITLE 1,Q2.2-Return the most number of catches taken by a player in IPL history?
+-- MAGIC %sql
+-- MAGIC with cte as
+-- MAGIC (select sum(ipl_ball.is_wicket) as catches , ipl_ball.fielder from ipl_ball where ipl_ball.is_wicket=1 and ipl_ball.dismissal_kind= 'caught' group by ipl_ball.fielder
+-- MAGIC )
+-- MAGIC ,cts as(
+-- MAGIC select * , dense_rank() over (order by catches desc) as rank from cte 
+-- MAGIC )
+-- MAGIC select catches, fielder from cts where rank=1
+
+-- COMMAND ----------
+
+-- DBTITLE 1,Q2.3-Highest wicket taker in matches which were affected by Duckworth-Lewis’s method (D/L method).
+-- MAGIC %sql
+-- MAGIC with cte as(
+-- MAGIC select count(ipl_ball.is_wicket) as wicket, ipl_ball.bowler as bowler from ipl_ball inner join ipl_matches on ipl_ball.match_id = ipl_matches.match_id where ipl_matches.method = 'D/L' and ipl_ball.is_wicket=1 group by bowler
+-- MAGIC )
+-- MAGIC ,cts as(
+-- MAGIC select *, dense_rank() over(order by wicket desc) as rank from cte
+-- MAGIC )
+-- MAGIC select wicket, bowler,rank from cts where rank=1
+
+-- COMMAND ----------
+
+-- DBTITLE 1,Q2.4-Highest strike rate by a batsman in non powerplay overs(7-20 overs)
+-- MAGIC %sql
+-- MAGIC with cte as(
+-- MAGIC select sum(ipl_ball.batsman_runs) as runs, count(ipl_ball.ball) as balls, ipl_ball.batsman as batsman from ipl_ball where ipl_ball.overs >6 group by batsman 
+-- MAGIC )
+-- MAGIC ,cts as(
+-- MAGIC select ((runs/balls)*100) as strike_rate , batsman from cte
+-- MAGIC )
+-- MAGIC ,cta as (
+-- MAGIC select *, dense_rank() over (order by strike_rate desc)as rank from cts)
+-- MAGIC select batsman, strike_rate from cta where rank=1
+
+-- COMMAND ----------
+
+-- DBTITLE 1,Q2.5-Write a query to return a report for highest extra runs in a venue
+-- MAGIC %sql
+-- MAGIC with cte as(
+-- MAGIC select ipl_matches.match_id as id , ipl_matches.venue_id as Vid, ipl_venue.venue as venue, ipl_venue.city as city from ipl_matches inner join ipl_venue on ipl_matches.venue_id=ipl_venue.venue_id
+-- MAGIC )
+-- MAGIC ,cts as (
+-- MAGIC select cte.id, cte.Vid, cte.venue as venue, cte.city as city , ipl_ball.extra_runs as extra_runs from cte inner join ipl_ball on cte.id=ipl_ball.match_id
+-- MAGIC )
+-- MAGIC ,cta as(
+-- MAGIC select sum(cts.extra_runs) as extra_runs , cts.venue, cts.city from cts group by venue ,city
+-- MAGIC )
+-- MAGIC ,ctb as(
+-- MAGIC select *, rank() over(order by extra_runs desc) as rank from cta
+-- MAGIC )
+-- MAGIC select * from ctb where rank=1
+
+-- COMMAND ----------
+
+-- DBTITLE 1,Q2.6-Cricketers with the most number of players of the match award in neutral venues.
+-- MAGIC %sql
+-- MAGIC with cte as(
+-- MAGIC select ipl_matches.player_of_match as player_name , count(neutral_venue) as number_of_awards from ipl_matches where ipl_matches.neutral_venue = 1 group by player_name 
+-- MAGIC )
+-- MAGIC ,cts as(
+-- MAGIC select *, dense_rank() over (order by number_of_awards desc) as rank from cte
+-- MAGIC )
+-- MAGIC select * from cts where rank=1
+
+-- COMMAND ----------
+
+-- DBTITLE 1,Q2.7-List of top 10 players with the highest batting average
+-- MAGIC %sql
+-- MAGIC with cte as (
+-- MAGIC select sum(ipl_ball.batsman_runs) as total_runs, sum(ipl_ball.is_wicket) as total_out,(sum(ipl_ball.batsman_runs)/sum(ipl_ball.is_wicket)) as batting_avg , ipl_ball.batsman as batsman from ipl_ball  group by batsman
+-- MAGIC )
+-- MAGIC ,cts as (
+-- MAGIC select * , rank() over (order by batting_avg desc) as r from cte 
+-- MAGIC )
+-- MAGIC select * from cts where r<11
+
+-- COMMAND ----------
+
+-- DBTITLE 1,Q2.8-Query to find out who has officiated (as an umpire) the most number of matches in IPL.
+-- MAGIC %sql
+-- MAGIC with cte as(
+-- MAGIC select match_id, stack(2,'umpire_1',umpire1,'umpire_2',umpire2) as (umpire_term,umpire_name) from ipl_matches 
+-- MAGIC )
+-- MAGIC ,cts as(
+-- MAGIC select count(cte.match_id) as number_of_matches, cte.umpire_name as umpire_name from cte group by cte.umpire_name
+-- MAGIC )
+-- MAGIC ,cta as(
+-- MAGIC select *, rank() over (order by number_of_matches desc) as rank from cts
+-- MAGIC )
+-- MAGIC select * from cta where rank=1
+
+-- COMMAND ----------
+
+-- DBTITLE 1,Q2.9-How winning/losing tosses can impact a match and it's result?
+-- MAGIC %sql
+-- MAGIC 
+-- MAGIC select count(*) as Counts, 'Number_of_Times_Toss_winner_is_match_winner' as Status from ipl_matches where ipl_matches.toss_winner=ipl_matches.winner
+-- MAGIC union all
+-- MAGIC 
+-- MAGIC select count(*) as Counts, 'Number_of_Times_Toss_winner_is_not_match_winner' as Status from ipl_matches where ipl_matches.toss_winner!=ipl_matches.winner
+
+-- COMMAND ----------
+
+-- DBTITLE 1,Uploading Datasets in Sqlite3
+-- MAGIC %python
+-- MAGIC # coding=utf8
+-- MAGIC import sqlite3 as sql
+-- MAGIC import pandas as pd
+-- MAGIC 
+-- MAGIC ipl_match = spark.read.format("csv").load("dbfs:/FileStore/shared_uploads/kshitijsinghh99@gmail.com/ipl_matches-2.csv",header="true")
+-- MAGIC ipl_venues = spark.read.format("csv").load("dbfs:/FileStore/shared_uploads/kshitijsinghh99@gmail.com/ipl_venue-3.csv",header="true")
+-- MAGIC ipl_balls = spark.read.format("csv").load("dbfs:/FileStore/shared_uploads/kshitijsinghh99@gmail.com/ipl_ball_by_ball.csv",header="true")
+-- MAGIC 
+-- MAGIC 
+-- MAGIC ipl_matches = ipl_match.toPandas()
+-- MAGIC ipl_venue = ipl_venues.toPandas()
+-- MAGIC ipl_ball = ipl_balls.toPandas()
+-- MAGIC conn = sql.connect('IPL_Analysis.db')
+-- MAGIC ipl_matches.to_sql('ipl_matches',conn)
+-- MAGIC ipl_venue.to_sql('ipl_venue',conn)
+-- MAGIC ipl_ball.to_sql('ipl_ball',conn)
+
+-- COMMAND ----------
+
+-- DBTITLE 1,Querying in Sqlite3
+-- MAGIC %python 
+-- MAGIC # coding=utf8
+-- MAGIC import sqlite3 as sql
+-- MAGIC class Database:
+-- MAGIC     def connection(self):
+-- MAGIC         try:
+-- MAGIC             con = sql.connect('IPL_Analysis.db')
+-- MAGIC             print("Connected To Database")
+-- MAGIC             
+-- MAGIC             return con
+-- MAGIC         except Exception as e:
+-- MAGIC             print(e)
+-- MAGIC     
+-- MAGIC     
+-- MAGIC     
+-- MAGIC         
+-- MAGIC     def query1(self):
+-- MAGIC         con =self.connection()
+-- MAGIC         
+-- MAGIC         query= con.cursor()
+-- MAGIC         query.execute('with cte as(select count(ipl_matches.match_id) as number_of_matches , ipl_venue.venue from ipl_matches inner join ipl_venue on ipl_matches.venue_id= ipl_venue.venue_id where ipl_matches.eliminator= \'{}\' group by ipl_venue.venue ),cts as(select * , rank() over (order by number_of_matches desc) as rank from cte ) select cts.number_of_matches, cts.venue from cts where rank<\'{}\''.format("Y","4"))
+-- MAGIC         
+-- MAGIC         data = query.fetchall()
+-- MAGIC         for i in data:
+-- MAGIC             print("Number of matches hosted- "+str(i[0])+" ,"+"Name of stadium- "+str(i[1]))
+-- MAGIC         
+-- MAGIC         
+-- MAGIC         
+-- MAGIC         
+-- MAGIC     def query2(self):
+-- MAGIC         con =self.connection()
+-- MAGIC         print("connected")
+-- MAGIC         
+-- MAGIC         
+-- MAGIC         query= con.cursor()
+-- MAGIC         query.execute('with cte as(select sum(ipl_ball.is_wicket) as catches , ipl_ball.fielder from ipl_ball where ipl_ball.is_wicket=\'{}\' and ipl_ball.dismissal_kind= \'{}\' group by ipl_ball.fielder),cts as(select * , rank() over (order by catches desc) as rank from cte ) select catches,fielder  from cts limit \'{}\' ' .format('1','caught',"1"))
+-- MAGIC         data = query.fetchall()
+-- MAGIC         for i in data:
+-- MAGIC             print("Number of catches- "+str(i[0])+" ,"+"Name of player- "+str(i[1]) )
+-- MAGIC         
+-- MAGIC         
+-- MAGIC     def query3(self):
+-- MAGIC         
+-- MAGIC         con =self.connection()
+-- MAGIC         query= con.cursor()
+-- MAGIC         query.execute('with cte as(select sum(ipl_ball.is_wicket) as wicket, ipl_ball.bowler as bowler from ipl_ball inner join ipl_matches on ipl_ball.match_id = ipl_matches.match_id where ipl_matches.method = \'{}\'  and ipl_ball.is_wicket=\'{}\' group by bowler),cts as(select *, dense_rank() over(order by wicket desc) as rr from cte) select cts.wicket, cts.bowler,cts.rr from cts  limit \'{}\' '.format("D/L","1","2"))
+-- MAGIC         
+-- MAGIC         data = query.fetchall()
+-- MAGIC         for i in data:
+-- MAGIC             print("Number of wickets- "+str(i[0])+", "+"Name of player- "+ str(i[1])+" ")
+-- MAGIC         
+-- MAGIC         
+-- MAGIC     
+-- MAGIC     def query4(self):
+-- MAGIC         con =self.connection()
+-- MAGIC         
+-- MAGIC         query= con.cursor()
+-- MAGIC         query.execute('with cte as(select sum(ipl_ball.batsman_runs) as runs, count(ipl_ball.ball) as balls, ipl_ball.batsman as batsman from ipl_ball where ipl_ball.overs >\'{}\' group by batsman ),cts as(select ((runs/balls)*100) as strike_rate , batsman from cte),cta as (select *, dense_rank() over (order by strike_rate desc)as r from cts) select batsman, strike_rate from cta where r<\'{}\'  '.format("6","2"))
+-- MAGIC         data = query.fetchall()
+-- MAGIC         for i in data:
+-- MAGIC             print("Name of Player- "+str(i[0])+", "+"Strike_rate- "+str(i[1]))
+-- MAGIC         
+-- MAGIC         
+-- MAGIC     def query5(self):
+-- MAGIC         con =self.connection()
+-- MAGIC         
+-- MAGIC         query= con.cursor()
+-- MAGIC         query.execute('with cte as(select ipl_matches.match_id as id , ipl_matches.venue_id as Vid, ipl_venue.venue as venue, ipl_venue.city as city from ipl_matches inner join ipl_venue on ipl_matches.venue_id=ipl_venue.venue_id),cts as (select cte.id, cte.Vid, cte.venue as venue, cte.city as city , ipl_ball.extra_runs as extra_runs from cte inner join ipl_ball on cte.id=ipl_ball.match_id),cta as(select sum(cts.extra_runs) as extra_runs , cts.venue, cts.city from cts group by venue ,city),ctb as(select *, rank() over(order by extra_runs desc) as rank from cta)select * from ctb limit \'{}\' ' .format("1"))
+-- MAGIC         data = query.fetchall()
+-- MAGIC         for i in data:
+-- MAGIC             print("Extras_Run- "+str(i[0])+", "+"Stadium_Name- "+str(i[1])+", "+"Stadium_City- "+str(i[2]))
+-- MAGIC         
+-- MAGIC         
+-- MAGIC     def query6(self):
+-- MAGIC         con =self.connection()
+-- MAGIC         
+-- MAGIC         query= con.cursor()
+-- MAGIC         query.execute('with cte as(select ipl_matches.player_of_match as player_name , count(neutral_venue) as number_of_awards from ipl_matches where ipl_matches.neutral_venue = 1 group by player_name ),cts as(select *, dense_rank() over (order by number_of_awards desc) as rank from cte)select * from cts limit \'{}\'' .format("4"))
+-- MAGIC         data = query.fetchall()
+-- MAGIC         for i in data:
+-- MAGIC             print("Name of Player- "+str(i[0])+", "+"Number of Awards-"+str(i[1]))
+-- MAGIC         
+-- MAGIC         
+-- MAGIC     def query7(self):
+-- MAGIC         con =self.connection()
+-- MAGIC         
+-- MAGIC         query= con.cursor()
+-- MAGIC         query.execute('with cte as (select sum(ipl_ball.batsman_runs) as total_runs, sum(ipl_ball.is_wicket) as total_out,(sum(ipl_ball.batsman_runs)/sum(ipl_ball.is_wicket)) as batting_avg , ipl_ball.batsman as batsman from ipl_ball  group by batsman),cts as (select * , dense_rank() over (order by batting_avg desc) as r from cte )select * from cts where r<\'{}\''.format("11"))
+-- MAGIC         data = query.fetchall()
+-- MAGIC         for i in data:
+-- MAGIC             print("Runs_scored- "+ str(i[0])+", "+"Total number of outs- " + ", " + str(i[1]) + ", " + "Batting Average- " + str(i[2])+ ", " + "Name of player- " +str(i[3]))
+-- MAGIC         
+-- MAGIC         
+-- MAGIC     def query8(self):
+-- MAGIC         con =self.connection()
+-- MAGIC         
+-- MAGIC         query= con.cursor()
+-- MAGIC         query.execute('with cte as(select match_id, stack(\'{}\',\'{}\',\'{}\',\'{}\',\'{}\') as (\'{}\',\'{}\') from ipl_matches ),cts as(select count(cte.match_id) as number_of_matches, cte.umpire_name as umpire_name from cte group by cte.umpire_name),cta as(select *, rank() over (order by number_of_matches desc) as rank from cts)select * from cta where rank=\'{}\''.format("2","umpire_1","umpire1","umpire_2","umpire2","umpire_term","umpire_name","1"))
+-- MAGIC         data = query.fetchall()
+-- MAGIC         
+-- MAGIC         return data
+-- MAGIC Query= Database()
+-- MAGIC Query.query1()
+
+-- COMMAND ----------
+
+
